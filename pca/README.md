@@ -25,9 +25,9 @@ Where each row represents an observation and each column represents a feature.
 
 The first step is to center the data by subtracting the mean from each feature:
 
-$$
+$
 \bar{x}_j = \frac{1}{n} \sum_{i=1}^{n} x_{ij}
-$$
+$
 
 The centered data matrix becomes:
 
@@ -47,9 +47,9 @@ $$
 
 This is a p × p symmetric matrix where element $C_{ij}$ represents the covariance between features i and j:
 
-$$
+$
 C_{ij} = \frac{1}{n-1} \sum_{k=1}^{n} (x_{ki} - \bar{x}_i)(x_{kj} - \bar{x}_j)
-$$
+$
 
 ### Eigenvalue Decomposition
 
@@ -69,14 +69,14 @@ The eigenvalues are ordered: $\lambda_1 \geq \lambda_2 \geq \cdots \geq \lambda_
 
 The principal components are the eigenvectors of the covariance matrix. The i-th principal component is:
 
-$$
+$
 \mathbf{v}_i = \begin{bmatrix}
 v_{i1} \\
 v_{i2} \\
 \vdots \\
 v_{ip}
 \end{bmatrix}
-$$
+$
 
 These vectors are orthonormal: $\mathbf{v}_i^T \mathbf{v}_j = \delta_{ij}$
 
@@ -150,9 +150,9 @@ $$
 
 PCA can be formulated as finding the direction that maximizes variance. For the first principal component:
 
-$$
+$
 \mathbf{v}_1 = \arg\max_{\|\mathbf{v}\|=1} \mathbf{v}^T C \mathbf{v}
-$$
+$
 
 This is solved using Lagrange multipliers:
 
@@ -172,9 +172,9 @@ This gives us the eigenvalue equation: $C\mathbf{v} = \lambda\mathbf{v}$
 
 Subsequent principal components are found by maximizing variance subject to orthogonality constraints:
 
-$$
+$
 \mathbf{v}_k = \arg\max_{\|\mathbf{v}\|=1, \mathbf{v}^T\mathbf{v}_i=0 \text{ for } i<k} \mathbf{v}^T C \mathbf{v}
-$$
+$
 
 ## Singular Value Decomposition (SVD) Approach
 
