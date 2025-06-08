@@ -77,8 +77,7 @@ class SelfAttention:
         return attention_weights @ V
 
 class MultiHeadSelfAttention:
-    def __init__(self, X, d_model=512,h=8) -> None:
-        self.X = X
+    def __init__(self, d_model=512,h=8) -> None:
         self.h = h
         self.d_model = d_model
         self.d_k = self.d_model // self.h
@@ -88,10 +87,10 @@ class MultiHeadSelfAttention:
         self.Wv = [np.random.rand(self.d_model, self.d_v) for _ in range(self.h)]
         self.Wo = np.random.rand(self.d_v * self.h, self.d_model)
 
-    def forward(self):
-        Q = np.stack([self.X @ self.Wq[i] for i in range(self.h)])
-        K = np.stack([self.X @ self.Wk[i] for i in range(self.h)])
-        V = np.stack([self.X @ self.Wv[i] for i in range(self.h)])
+    def forward(self, X):
+        Q = np.stack([X @ self.Wq[i] for i in range(self.h)])
+        K = np.stack([X @ self.Wk[i] for i in range(self.h)])
+        V = np.stack([X @ self.Wv[i] for i in range(self.h)])
         heads = [SelfAttention(d_model=self.d_model, d_k=self.d_k).forward(Q[i], K[i], V[i]) for i in range(self.h)]
         return np.concatenate(heads, axis=-1) @ self.Wo
 
@@ -100,7 +99,7 @@ class MultiHeadSelfAttention:
 # the overfitting problem of Layer Normalization because of the gamma and beta parameters.
 # However, I wanted to stick to the original paper.
 class LayerNormalization:
-    def __init__(self, X, d_model=512, lr=0.01):
+    def __init__(self, d_model=512, lr=0.01):
         self.lr = lr
         self.d_model = d_model
         self.epsilon = 1e-5
@@ -122,17 +121,40 @@ class LayerNormalization:
         self.gamma -= self.lr * grad_gamma
         self.beta -= self.lr * grad_beta
 
+def relu_derivative(x):
+    return np.where(x > 0, 1, 0)
+
 class FeedForward:
-    def __init__(self, X, d_model=512, d_ff=2048):
-        self.X = X
+    def __init__(self, d_model=512, d_ff=2048, lr=0.01):
         self.d_model = d_model
         self.d_ff = d_ff
         self.W1 = np.random.rand(self.d_model, self.d_ff)
         self.W2 = np.random.rand(self.d_ff, self.d_model)
+        self.b1 = np.zeros((1, self.d_ff))
+        self.b2 = np.zeros((1, self.d_model))
+
+    def forward(self, X):
+        self.X = X
+        return np.maximum(0, X @ self.W1 + self.b1) @ self.W2 + self.b2
+    
+    def backprop(self, z1, z2, grad_output_1, grad_output_2):
+        grad_z2 = grad_output_1
+        grad_z1 = grad_output_2 @ relu_derivative(z1)
+        grad_W2 = grad_z2 @ z1.T
+        grad_b2 = np.sum(grad_z2, axis=0)
+        grad_W1 = grad_z1 @ self.X.T
+        grad_b1 = np.sum(grad_z1, axis=0)
+        return grad_W1, grad_b1, grad_W2, grad_b2
+
+    def update_parameters(self, grad_W1, grad_b1, grad_W2, grad_b2):
+        self.W1 -= self.lr * grad_W1
+        self.b1 -= self.lr * grad_b1
+        self.W2 -= self.lr * grad_W2
+        self.b2 -= self.lr * grad_b2
+
 
 class Encoder:
-    def __init__(self, X, d_model=512, h=8, d_ff=2048):
-        self.X = X
+    def __init__(self, d_model=512, h=8, d_ff=2048):
         self.d_model = d_model
         self.h = h
         self.d_ff = d_ff
@@ -141,8 +163,11 @@ class Encoder:
 
     def forward(self, X):
         # at this point we consider that the input is already embedded
-        multi_head_attention = MultiHeadSelfAttention(X=X, d_model=self.d_model, h=self.h)
-        add_and_layer_norm = LayerNormalization(X=(multi_head_attention.forward() + X), d_model=self.d_model)
+        multi_head_attention = MultiHeadSelfAttention(d_model=self.d_model, h=self.h).forward(X)
+        add_and_layer_norm = LayerNormalization(d_model=self.d_model).forward(multi_head_attention + X)
+        feed_forward = FeedForward(d_model=self.d_model, d_ff=self.d_ff).forward(add_and_layer_norm)
+        second_add_and_layer_norm = LayerNormalization(d_model=self.d_model).forward(feed_forward + add_and_layer_norm)
+        return second_add_and_layer_norm
 
 class Transformer:
     def __init__(self, d_model=512, h=8, d_ff=2048):
@@ -162,7 +187,6 @@ if __name__ == "__main__":
     input_embedding = InputEmbedding(x=x, vocab_size=vocabulary.size, d_model=512, vocabulary=vocabulary)
     embeddings = input_embedding.forward()
     
-    multi_head_attention = MultiHeadSelfAttention(X=embeddings, d_model=512, h=8)
-    output = multi_head_attention.forward()
-    
-    
+    encoder = Encoder(d_model=512, h=8, d_ff=2048)
+    output = encoder.forward(X=embeddings)
+    print(output)
