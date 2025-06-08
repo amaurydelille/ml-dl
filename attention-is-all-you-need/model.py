@@ -69,32 +69,36 @@ class SelfAttention:
         self.d_model = d_model
         self.d_k = d_k
 
-    def forward(self, Q, K, V):
+    def forward(self, Q, K, V, mask=None):
         num_term = Q @ K.T
         denom_term = np.sqrt(self.d_k)
         attention_scores = num_term / denom_term
+        
+        if mask is not None:
+            attention_scores = np.where(mask == 0, -1e9, attention_scores)
+            
         attention_weights = softmax(attention_scores)
         return attention_weights @ V
 
 class MultiHeadSelfAttention:
-    def __init__(self, d_model=512,h=8) -> None:
+    def __init__(self, d_model=512, h=8) -> None:
         self.h = h
         self.d_model = d_model
         self.d_k = self.d_model // self.h
         self.d_v = self.d_model // self.h
-        self.Wq = [np.random.rand(self.d_model, self.d_k) for _ in range(self.h)]
-        self.Wk = [np.random.rand(self.d_model, self.d_k) for _ in range(self.h)]
-        self.Wv = [np.random.rand(self.d_model, self.d_v) for _ in range(self.h)]
-        self.Wo = np.random.rand(self.d_v * self.h, self.d_model)
+        self.Wq = [np.random.randn(self.d_model, self.d_k) for _ in range(self.h)]
+        self.Wk = [np.random.randn(self.d_model, self.d_k) for _ in range(self.h)]
+        self.Wv = [np.random.randn(self.d_model, self.d_v) for _ in range(self.h)]
+        self.Wo = np.random.randn(self.d_v * self.h, self.d_model)
 
-    def forward(self, X):
+    def forward(self, X, mask=None):
         Q = np.stack([X @ self.Wq[i] for i in range(self.h)])
         K = np.stack([X @ self.Wk[i] for i in range(self.h)])
         V = np.stack([X @ self.Wv[i] for i in range(self.h)])
-        heads = [SelfAttention(d_model=self.d_model, d_k=self.d_k).forward(Q[i], K[i], V[i]) for i in range(self.h)]
+        heads = [SelfAttention(d_model=self.d_model, d_k=self.d_k).forward(Q[i], K[i], V[i], mask) for i in range(self.h)]
         return np.concatenate(heads, axis=-1) @ self.Wo
 
-# I hesitated between using Layer Normalization or AdaNorm as described in this paper: https://arxiv.org/pdf/1911.07013
+# I hesitated between using Layer Normalization or AdaNorm as proposed in this paper: https://arxiv.org/pdf/1911.07013
 # I decided to implement Layer Normalization as the original paper uses it. But it's good to know that AdaNorm solves 
 # the overfitting problem of Layer Normalization because of the gamma and beta parameters.
 # However, I wanted to stick to the original paper.
@@ -152,6 +156,13 @@ class FeedForward:
         self.W2 -= self.lr * grad_W2
         self.b2 -= self.lr * grad_b2
 
+class DropoutLayer:
+    def __init__(self, dropout_rate=0.1):
+        self.dropout_rate = dropout_rate
+
+    def forward(self, X):
+        self.mask = np.random.rand(*X.shape) > self.dropout_rate
+        return X * self.mask
 
 class Encoder:
     def __init__(self, d_model=512, h=8, d_ff=2048):
@@ -161,14 +172,71 @@ class Encoder:
         self.Wq = np.random.rand(self.d_model, self.d_model)
         self.Wk = np.random.rand(self.d_model, self.d_model)
 
-    def forward(self, X):
-        # at this point we consider that the input is already embedded
+    def forward(self, X): # at this point we consider that the input is already embedded
+        # ========== FIRST SUB LAYER: MULTI HEAD SELF ATTENTION ==========
         multi_head_attention = MultiHeadSelfAttention(d_model=self.d_model, h=self.h).forward(X)
+        # -- Add & Norm --
         add_and_layer_norm = LayerNormalization(d_model=self.d_model).forward(multi_head_attention + X)
-        feed_forward = FeedForward(d_model=self.d_model, d_ff=self.d_ff).forward(add_and_layer_norm)
-        second_add_and_layer_norm = LayerNormalization(d_model=self.d_model).forward(feed_forward + add_and_layer_norm)
-        return second_add_and_layer_norm
+        # -- Dropout -- The original paper mentions using a dropout(p=0.01) after each sub-layer.
+        sub_layer_1 = DropoutLayer(dropout_rate=0.1).forward(add_and_layer_norm)
+        # ========== SECOND SUB LAYER: FEED FORWARD ==========
+        feed_forward = FeedForward(d_model=self.d_model, d_ff=self.d_ff).forward(sub_layer_1)
+        # -- Add & Norm --
+        second_add_and_layer_norm = LayerNormalization(d_model=self.d_model).forward(feed_forward + sub_layer_1)
+        # -- Dropout --
+        sub_layer_2 = DropoutLayer(dropout_rate=0.1).forward(second_add_and_layer_norm)
+        return sub_layer_2
+    
+class LinearLayer:
+    def __init__(self, d_model=512, d_out=512, lr=0.01):
+        self.d_model = d_model
+        self.d_out = d_out
+        self.W = np.random.rand(self.d_model, self.d_out)
+        self.b = np.zeros((1, self.d_out))
+        self.lr = lr
+        
+    def forward(self, X):
+        return X @ self.W + self.b # shape: (batch_size, seq_len, d_out)
+    
+    def backprop(self, X, grad_output):
+        grad_W = grad_output.T @ X
+        grad_b = np.sum(grad_output, axis=0)
+        return grad_W, grad_b
+    
+    def update_parameters(self, grad_W, grad_b):
+        self.W -= self.lr * grad_W
+        self.b -= self.lr * grad_b
 
+class Decoder:
+    def __init__(self, d_model=512, h=8, d_ff=2048):
+        self.d_model = d_model
+        self.h = h
+        self.d_ff = d_ff
+        self.Wq = np.random.rand(self.d_model, self.d_model)
+        self.Wk = np.random.rand(self.d_model, self.d_model)
+        self.Wv = np.random.rand(self.d_model, self.d_model)
+
+    def forward(self, X_enc, X_dec):
+        # ========== FIRST SUB LAYER: MASKED MULTI HEAD SELF ATTENTION ==========
+        multi_head_attention = MultiHeadSelfAttention(d_model=self.d_model, h=self.h).forward(X_dec, mask=np.triu(np.ones((X_dec.shape[1], X_dec.shape[1])), k=1))
+        # -- Add & Norm --
+        add_and_layer_norm = LayerNormalization(d_model=self.d_model).forward(multi_head_attention + X_dec)
+        # -- Dropout --
+        sub_layer_1 = DropoutLayer(dropout_rate=0.1).forward(add_and_layer_norm)
+        # ========== SECOND SUB LAYER: MULTI HEAD SELF ATTENTION ==========
+        multi_head_attention = MultiHeadSelfAttention(d_model=self.d_model, h=self.h).forward(sub_layer_1 + X_enc)
+        # -- Add & Norm --
+        add_and_layer_norm = LayerNormalization(d_model=self.d_model).forward(multi_head_attention + sub_layer_1)       
+        # -- Dropout --
+        sub_layer_2 = DropoutLayer(dropout_rate=0.1).forward(add_and_layer_norm)
+        # ========== THIRD SUB LAYER: FEED FORWARD ==========
+        feed_forward = FeedForward(d_model=self.d_model, d_ff=self.d_ff).forward(sub_layer_2)
+        # -- Add & Norm --
+        third_add_and_layer_norm = LayerNormalization(d_model=self.d_model).forward(feed_forward + sub_layer_2)
+        # -- Dropout --
+        sub_layer_3 = DropoutLayer(dropout_rate=0.1).forward(third_add_and_layer_norm)
+        return sub_layer_3
+    
 class Transformer:
     def __init__(self, d_model=512, h=8, d_ff=2048):
         self.d_model = d_model
