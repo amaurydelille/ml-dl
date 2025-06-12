@@ -1,5 +1,5 @@
 # variational-auto-encoder
-Implementation of a VAE using NumPy only.
+Implementation of a VAE using NumPy only. My hand-written notes can be found as _variational-auto-encoder-notes.pdf_
 
 The original paper: [Auto-Encoding Variational Bayes](https://arxiv.org/abs/1312.6114)
 
