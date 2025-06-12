@@ -13,5 +13,5 @@ a good idea to implement Transformers or any model without PyTorch in a professi
 I have tried to make my code as clean and commented as possible, but it still might
 seems a bit messy.
 
-My hand-written notes can be found as "attention-is-all-you-need-notes.pdf" in 
+My hand-written notes can be found as _attention-is-all-you-need-notes.pdf_ in 
 the repo. Don't hesitate to open issues if you find any error in my calculations.
